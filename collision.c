@@ -1,5 +1,6 @@
 
 b32 add_collision(game_t* game, collision_t* collision) {
+	++game->collisions_this_frame;
 	FOR (i, array_size(game->collisions)) {
 		if (!game->collisions[i].e1) {
 			game->collisions[i] = *collision;
@@ -99,7 +100,7 @@ void nath_physics(game_t* game, entity_t* a, entity_t b) {
     
     // Calculate the new velocity vectors of a and b after the collision
     a->vel = add2(mul2f(normal, max(newndotva, 0.0f)), mul2f(tangent, tdotva));
-	if (DEBUG_MODE) {
+	if (DEBUG_VELOCITY_LINES) {
 		add_debug_line(game, a->pos, add2(a->pos, a->vel), vec4(1, 0, 1, 1));
 	}
 	
@@ -148,13 +149,17 @@ void entity_collision_effect(game_t* game, entity_t* a, entity_t b) {
 	}
 
 	if (a->type == PLAYER) {
-		if (len2(a->vel) > 0.2f || a->on_bottom) {
+		if (len2(a->vel) > 0.5f || a->on_bottom) {
 			a->dead = TRUE;
 			return;
 		}
 		else {
 			add_glance_particles(game, add2(a->pos, mul2f(normal, a->collider.radius)), vel, 0.1f, vec4(1.0f, 1.0f, 0.2f, 1.0f)); 
 			add_glance_particles(game, add2(a->pos, mul2f(normal, a->collider.radius)), vel, 0.1f, vec4(1.0f, 1.0f, 0.2f, 1.0f)); 
+		}
+		if (a->on_bottom) {
+			a->dead = TRUE;
+			return;
 		}
 	}
 
@@ -177,9 +182,13 @@ void entity_collision_effect(game_t* game, entity_t* a, entity_t b) {
 			vec2_t vel = vec2(a->vel.x, -a->vel.y);
 			add_glance_particles(game, add2(a->pos, mul2f(normal, a->collider.radius)), vel, 0.3f, vec4(1.0f, 1.0f, 0.2f, 1.0f)); 
 			add_glance_particles(game, add2(a->pos, mul2f(normal, a->collider.radius)), vel, 0.3f, vec4(1.0f, 1.0f, 0.2f, 1.0f));
+			if (DEBUG_MODE) {
+				add_debug_line(game, a->pos, b.pos, PURPLE);
+			}
 			a->dead = TRUE;
-			return;
-		} 
+		} else {
+			play_sound(&game->audio, game->sounds.bullet, AUDIO_VOLUME);
+		}
 		// if (a->type==OBSTACLE && a->obstacle_type==ASTEROID_GREEN) {
 		// 	a->dead = TRUE;
 		// 	return;
@@ -207,6 +216,9 @@ void entity_collision_effect(game_t* game, entity_t* a, entity_t b) {
 
 	if (b.type != BULLET || a->type==OBSTACLE) {
 		//(a->obstacle_type==ASTEROID_BLUE && a->obstacle_type==ASTEROID_GREEN)) {
+		if (a->type == OBSTACLE && a->obstacle_type == ASTEROID_YELLOW && b.type == BULLET) {
+			return;
+		}
 		nath_physics(game, a, b);
 	}
 }
@@ -323,9 +335,6 @@ b32 entity_collision(game_t* game, entity_t* a, entity_t* b) {
 			// a->vel = add2(a->vel, mul2f(sub2(b->vel, a->vel), 0.5f));
 			// b->vel = add2(b->vel, mul2f(sub2(a->vel, b->vel), 0.5f));
 
-			
-
-			
 			return TRUE;
 		}
 	}
@@ -333,100 +342,113 @@ b32 entity_collision(game_t* game, entity_t* a, entity_t* b) {
 	if (a->collider.type == COLLIDER_CIRCLE &&
 		b->collider.type == COLLIDER_DEATH) {
 		float dist = len2(sub2(a->pos, b->pos)) - (a->collider.radius + b->ani);
-		if (dist < 0.0f) {
+		if (dist < 0.0f && (a->type != OBSTACLE || a->obstacle_type != ASTEROID_YELLOW)) {
 			a->dead = TRUE;
-		}
-	}
-
-	if (a->collider.type == COLLIDER_CIRCLE) {
-		if (a->pos.x-a->collider.radius < SCREEN_LEFT) {
-			a->pos.x = SCREEN_LEFT+a->collider.radius;
-			a->vel.x = -a->vel.x;
-		}
-		if (a->pos.x+a->collider.radius > SCREEN_RIGHT) {
-			a->pos.x = SCREEN_RIGHT-a->collider.radius;
-			a->vel.x = -a->vel.x;
-		}
-		if (a->type==PLAYER && a->pos.y-a->collider.radius-game->up < SCREEN_BOTTOM) {
-			a->pos.y = SCREEN_BOTTOM+game->up+a->collider.radius + 0.1f;
-			a->vel.y = -a->vel.y;
-			a->on_bottom = TRUE;
-		} else {
-			a->on_bottom = FALSE;
 		}
 	}
 
 	return FALSE;
 }
 
+b32 screen_edge_collision(game_t* game, entity_t* entity) {
+	if (entity->collider.type == COLLIDER_CIRCLE) {
+		if (entity->pos.x-entity->collider.radius < SCREEN_LEFT) {
+			entity->pos.x = SCREEN_LEFT+entity->collider.radius;
+			entity->vel.x = -entity->vel.x;
+		}
+		if (entity->pos.x+entity->collider.radius > SCREEN_RIGHT) {
+			entity->pos.x = SCREEN_RIGHT-entity->collider.radius;
+			entity->vel.x = -entity->vel.x;
+		}
+		if (entity->type==PLAYER && entity->pos.y-entity->collider.radius-game->up < SCREEN_BOTTOM) {
+			entity->pos.y = SCREEN_BOTTOM+game->up+entity->collider.radius + 0.1f;
+			entity->vel.y = entity->vel.y + 0.1f;
+			entity->on_bottom = TRUE;
+		} else {
+			entity->on_bottom = FALSE;
+		}
+		if (entity->type==OBSTACLE &&
+			entity->obstacle_type!=ASTEROID_WHITE) {
+			if (entity->pos.y+entity->collider.radius > WALL_NARROW_START) {
+				entity->pos.y = WALL_NARROW_START-entity->collider.radius;
+				entity->vel.y = -entity->vel.y;
+			}
+		}
+	}
+}
+
 b32 wall_collision(game_t* game, entity_t* entity) {
 	int wall_segment = entity->pos.y + SCREEN_TOP;
-	wall_segment = iclamp(wall_segment, 0, array_size(game->left_wall)-1);
+	wall_segment = imax(wall_segment, 0);
 
-	{
-		vec2_t* segment = game->left_wall + wall_segment;
+	if (entity->collider.type == COLLIDER_CIRCLE) {
+		if (wall_segment < array_size(game->left_wall)-1) {
+			{
+				vec2_t* segment = game->left_wall + wall_segment;
 
-		float intersect = entity->pos.y - (segment)->y;
-		vec2_t point = lerp2(segment[0], segment[1], intersect);
+				float intersect = entity->pos.y - (segment)->y;
+				vec2_t point = lerp2(segment[0], segment[1], intersect);
 
-		if (entity->pos.x - entity->collider.radius < point.x) {
-			if (len2(entity->vel) > 0.5f) {
-				entity->dead = TRUE;
-				return TRUE;
+				if (entity->pos.x - entity->collider.radius < point.x) {
+					if (len2(entity->vel) > 0.5f) {
+						entity->dead = TRUE;
+						return TRUE;
+					}
+
+					entity->pos.x = point.x + entity->collider.radius;
+
+					vec2_t tangent = normalize2(sub2(segment[0], segment[1]));
+					vec2_t normal = vec2(-tangent.y, tangent.x);
+
+					float ndotva = dot2(normal, entity->vel);
+					float ndotvb = dot2(normal, vec2(0, 0));
+					float tdotva = dot2(tangent, entity->vel);
+					float amass = entity->mass;
+					float bmass = 100;
+					float newndotva = (ndotva * (amass-bmass) + 2 * bmass * ndotvb) / ((amass + bmass)*2.0f);
+					entity->vel = add2(mul2f(normal, max(newndotva, 0.0f)), mul2f(tangent, tdotva));
+
+					return TRUE;
+				}
+
+				// gfx_color(vec4(1, 0, 1, 1));
+				// gfx_line(game->left_wall[wall_segment], game->left_wall[wall_segment+1]);
+				// gfx_point(point);
 			}
 
-			entity->pos.x = point.x + entity->collider.radius;
+			{
+				vec2_t* segment = game->right_wall + wall_segment;
 
-			vec2_t tangent = normalize2(sub2(segment[0], segment[1]));
-			vec2_t normal = vec2(-tangent.y, tangent.x);
+				float intersect = entity->pos.y - (segment)->y;
+				vec2_t point = lerp2(segment[0], segment[1], intersect);
 
-			float ndotva = dot2(normal, entity->vel);
-			float ndotvb = dot2(normal, vec2(0, 0));
-			float tdotva = dot2(tangent, entity->vel);
-			float amass = entity->mass;
-			float bmass = 100;
-			float newndotva = (ndotva * (amass-bmass) + 2 * bmass * ndotvb) / ((amass + bmass)*2.0f);
-			entity->vel = add2(mul2f(normal, max(newndotva, 0.0f)), mul2f(tangent, tdotva));
+				if (entity->pos.x + entity->collider.radius > point.x) {
+					if (len2(entity->vel) > 0.5f) {
+						entity->dead = TRUE;
+						return TRUE;
+					}
 
-			return TRUE;
-		}
+					entity->pos.x = point.x - entity->collider.radius;
 
-		// gfx_color(vec4(1, 0, 1, 1));
-		// gfx_line(game->left_wall[wall_segment], game->left_wall[wall_segment+1]);
-		// gfx_point(point);
-	}
+					vec2_t tangent = normalize2(sub2(segment[1], segment[0]));
+					vec2_t normal = vec2(-tangent.y, tangent.x);
 
-	{
-		vec2_t* segment = game->right_wall + wall_segment;
+					float ndotva = dot2(normal, entity->vel);
+					float ndotvb = dot2(normal, vec2(0, 0));
+					float tdotva = dot2(tangent, entity->vel);
+					float amass = entity->mass;
+					float bmass = 10;
+					float newndotva = (ndotva * (amass-bmass) + 2 * bmass * ndotvb) / ((amass + bmass)*2.0f);
+					entity->vel = add2(mul2f(normal, max(newndotva, 0.0f)), mul2f(tangent, tdotva));
 
-		float intersect = entity->pos.y - (segment)->y;
-		vec2_t point = lerp2(segment[0], segment[1], intersect);
+					return TRUE;
+				}
 
-		if (entity->pos.x + entity->collider.radius > point.x) {
-			if (len2(entity->vel) > 0.5f) {
-				entity->dead = TRUE;
-				return TRUE;
+				// gfx_color(vec4(1, 0, 1, 1));
+				// gfx_line(game->left_wall[wall_segment], game->left_wall[wall_segment+1]);
+				// gfx_point(point);
 			}
-
-			entity->pos.x = point.x - entity->collider.radius;
-
-			vec2_t tangent = normalize2(sub2(segment[1], segment[0]));
-			vec2_t normal = vec2(-tangent.y, tangent.x);
-
-			float ndotva = dot2(normal, entity->vel);
-			float ndotvb = dot2(normal, vec2(0, 0));
-			float tdotva = dot2(tangent, entity->vel);
-			float amass = entity->mass;
-			float bmass = 10;
-			float newndotva = (ndotva * (amass-bmass) + 2 * bmass * ndotvb) / ((amass + bmass)*2.0f);
-			entity->vel = add2(mul2f(normal, max(newndotva, 0.0f)), mul2f(tangent, tdotva));
-
-			return TRUE;
 		}
-
-		// gfx_color(vec4(1, 0, 1, 1));
-		// gfx_line(game->left_wall[wall_segment], game->left_wall[wall_segment+1]);
-		// gfx_point(point);
 	}
 
 	return FALSE;

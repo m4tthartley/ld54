@@ -4,10 +4,10 @@
 // #include <windows.h>
 // #include <mmeapi.h>
 
-#include <platform.h>
-#include <im.h>
-#include <timer.h>
-#include <file.h>
+#include <core/platform.h>
+#include <core/im.h>
+#include <core/timer.h>
+#include <core/file.h>
 
 #define AUDIO_VOLUME_ENGINE (0.05f)
 #define AUDIO_VOLUME (0.25f)
@@ -15,7 +15,7 @@
 // #define AUDIO_WAVEOUT TRUE
 
 #ifdef AUDIO_ON
-#include <audio.h>
+#include <core/audio.h>
 
 void init_audio(core_audio_t* audio) {
 	core_init_audio(audio, CORE_DEFAULT_AUDIO_MIXER_PROC, 0);
@@ -343,7 +343,7 @@ void add_blast(game_t* game, vec2_t pos, float size) {
 }
 
 void player_die(game_t* game, entity_t* player) {
-	FOR (i, array_size(player_model)) {
+	FOR (i, array_size(player_model)-1) {
 		add_debris(game, player->vel, add2(player->pos, rotate2(player_model[i], player->rot)), add2(player->pos, rotate2(player_model[i+1], player->rot)));
 	}
 	player->dead = TRUE;
